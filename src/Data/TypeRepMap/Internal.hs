@@ -281,11 +281,14 @@ keys TypeRepMap{..} = SomeTypeRep . anyToTypeRep <$> toList trKeys
 -- http://bannalia.blogspot.com/2015/06/cache-friendly-binary-search.html
 -- with modification for our two-vector search case.
 cachedBinarySearch :: Fingerprint -> PrimArray Word64 -> PrimArray Word64 -> Maybe Int
-cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline (go 0#)
+cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline
+    (case go 0# of
+       (-1#) -> Nothing
+       i -> Just (I# i))
   where
-    go :: Int# -> Maybe Int
+    go :: Int# -> Int#
     go i = case i <# len of
-        0# -> Nothing
+        0# -> (-1#)
         _  -> let !(W64# valA) = indexPrimArray fpAs (I# i) in case a `ltWord#` valA of
             0#  -> case a `eqWord#` valA of
                 0# -> go (2# *# i +# 2#)
@@ -293,7 +296,7 @@ cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline (go 0#)
                     0# -> case b `ltWord#` valB of
                         0# -> go (2# *# i +# 2#)
                         _  -> go (2# *# i +# 1#)
-                    _ -> Just (I# i)
+                    _ -> i
             _ -> go (2# *# i +# 1#)
 
     len :: Int#
