@@ -40,7 +40,7 @@ library
   exposed-modules:     Data.TMap
                        Data.TypeRepMap
                        Data.TypeRepMap.Internal
-  ghc-options:         -Wall
+  ghc-options:         -Wall -optc='-O3'
   c-sources:           cbits/search.c
   build-depends:       base >= 4.10 && < 5
                      , containers >= 0.5.10.2 && < 0.7

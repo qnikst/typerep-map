@@ -8,6 +8,7 @@ int offset = 11;
 
 int64_t esearch(uint64_t search_a, uint64_t search_b, uint64_t *a, uint64_t *b, int64_t n) {
    int64_t i = 0;
+   //unsigned __int128 v = MKW128(search_a,search_b);
    while (i < n) {
      //__builtin_prefetch(a+(multiplier*i+offset));
      //__builtin_prefetch(b+(multiplier*i+offset));
