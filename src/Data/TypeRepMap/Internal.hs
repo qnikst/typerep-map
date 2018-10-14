@@ -10,6 +10,7 @@
 {-# LANGUAGE TypeFamilies        #-}
 {-# LANGUAGE TypeInType          #-}
 {-# LANGUAGE ViewPatterns        #-}
+{-# LANGUAGE UnliftedFFITypes    #-}
 
 -- {-# OPTIONS_GHC -ddump-simpl -dsuppress-idinfo -dsuppress-coercions -dsuppress-type-applications -dsuppress-uniques -dsuppress-module-prefixes #-}
 
@@ -32,10 +33,10 @@ import Data.Primitive.Array (Array, MutableArray, indexArray, mapArray', readArr
                              thawArray, unsafeFreezeArray, writeArray)
 import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Semigroup (Semigroup (..))
-import GHC.Base (Any, Int (..), Int#, (*#), (+#), (<#))
-import GHC.Exts (IsList (..), inline, sortWith)
+import GHC.Base (Any, Int (..), Int#, (*#), (+#), (<#), (-#))
+import GHC.Exts -- (IsList (..), inline, sortWith, ctz#, unsafeCoerce#, uncheckedIShiftL64#, Word#, plusWord#,  popCnt#, uncheckedIShiftRL#, xor#, word2Int#, int2Word#, negateInt#)
 import GHC.Fingerprint (Fingerprint (..))
-import GHC.Prim (eqWord#, ltWord#)
+import GHC.Prim (eqWord#, ltWord#, leWord#, not#)
 import GHC.Word (Word64 (..))
 import Type.Reflection (SomeTypeRep (..), TypeRep, Typeable, typeRep, withTypeable)
 import Type.Reflection.Unsafe (typeRepFingerprint)
@@ -77,6 +78,7 @@ data TypeRepMap (f :: k -> Type) =
 -- | Shows only keys.
 instance Show (TypeRepMap f) where
     show TypeRepMap{..} = "TypeRepMap [" ++ showKeys ++ "]"
+         ++ show fingerprintAs ++ "-" ++ show fingerprintBs
       where
         showKeys :: String
         showKeys = intercalate ", " $ toList $ mapArray' (show . anyToTypeRep) trKeys
@@ -277,6 +279,8 @@ keys :: TypeRepMap f -> [SomeTypeRep]
 keys TypeRepMap{..} = SomeTypeRep . anyToTypeRep <$> toList trKeys
 {-# INLINE keys #-}
 
+foreign import ccall unsafe "ffs" ffs :: Int# -> Int#
+
 -- | Binary searched based on this article
 -- http://bannalia.blogspot.com/2015/06/cache-friendly-binary-search.html
 -- with modification for our two-vector search case.
@@ -284,20 +288,31 @@ cachedBinarySearch :: Fingerprint -> PrimArray Word64 -> PrimArray Word64 -> May
 cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline
     (case go 0# of
        (-1#) -> Nothing
-       i -> Just (I# i))
+       i -> -- We return either element or greater one
+            -- so we need to twice check if the element
+            -- is the required one.
+            let !(W64# valA) = indexPrimArray fpAs (I# i)
+                !(W64# valB) = indexPrimArray fpBs (I# i)
+            in case a `eqWord#` valA of
+                 0# -> Nothing
+                 _  -> case b `eqWord#` valB of
+                        0# -> Nothing
+                        _ -> Just (I# i))
   where
+    c n = negateInt# (n +# 1#)
     go :: Int# -> Int#
     go i = case i <# len of
-        0# -> (-1#)
-        _  -> let !(W64# valA) = indexPrimArray fpAs (I# i) in case a `ltWord#` valA of
-            0#  -> case a `eqWord#` valA of
-                0# -> go (2# *# i +# 2#)
-                _ -> let !(W64# valB) = indexPrimArray fpBs (I# i) in case b `eqWord#` valB of
-                    0# -> case b `ltWord#` valB of
-                        0# -> go (2# *# i +# 2#)
-                        _  -> go (2# *# i +# 1#)
-                    _ -> i
-            _ -> go (2# *# i +# 1#)
+        0# -> case (i +# 1#) `uncheckedIShiftRL#` (ffs (c (i +# 1#))) of
+                0# -> -1#
+                j -> j -# 1#
+        _  -> 
+         let !(W64# valA) = indexPrimArray fpAs (I# i)
+             !(W64# valB) = indexPrimArray fpBs (I# i)
+         in case a `leWord#` valA of
+            0# -> go (2# *# i +# 2#)
+            _ -> case b `leWord#` valB of
+                0# -> go (2# *# i +# 1# +# (a `eqWord#` valA))
+                _  -> go (2# *# i +# 1#)
 
     len :: Int#
     len = let !(I# l) = sizeofPrimArray fpAs in l
