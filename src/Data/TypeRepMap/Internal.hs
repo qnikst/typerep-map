@@ -31,7 +31,7 @@ import Data.Kind (Type)
 import Data.List (intercalate, nubBy)
 import Data.Primitive.Array (Array, MutableArray, indexArray, mapArray', readArray, sizeofArray,
                              thawArray, unsafeFreezeArray, writeArray)
-import Data.Primitive.PrimArray (PrimArray, indexPrimArray, sizeofPrimArray)
+import Data.Primitive.PrimArray (PrimArray(..), indexPrimArray, sizeofPrimArray)
 import Data.Semigroup (Semigroup (..))
 import GHC.Base (Any, Int (..), Int#, (*#), (+#), (<#), (-#))
 import GHC.Exts -- (IsList (..), inline, sortWith, ctz#, unsafeCoerce#, uncheckedIShiftL64#, Word#, plusWord#,  popCnt#, uncheckedIShiftRL#, xor#, word2Int#, int2Word#, negateInt#)
@@ -44,6 +44,8 @@ import Unsafe.Coerce (unsafeCoerce)
 
 import qualified Data.Map.Strict as Map
 import qualified GHC.Exts as GHC (fromList, toList)
+
+import Debug.Trace
 
 {- |
 
@@ -281,11 +283,20 @@ keys TypeRepMap{..} = SomeTypeRep . anyToTypeRep <$> toList trKeys
 
 foreign import ccall unsafe "ffs" ffs :: Int# -> Int#
 
+foreign import ccall unsafe "esearch"
+  esearch :: Word# -> Word# -> ByteArray# -> ByteArray# -> Int# -> Int#
+
 -- | Binary searched based on this article
 -- http://bannalia.blogspot.com/2015/06/cache-friendly-binary-search.html
 -- with modification for our two-vector search case.
 cachedBinarySearch :: Fingerprint -> PrimArray Word64 -> PrimArray Word64 -> Maybe Int
-cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline
+cachedBinarySearch (Fingerprint (W64# a) (W64# b)) as@(PrimArray fpAs) bs@(PrimArray fpBs) = -- trace (show as) (trace (show bs) (
+  case esearch a b fpAs fpBs len of
+    (-1#) -> Nothing
+    i -> Just (I# i)
+  --))
+{-
+  inline
     (case go 0# of
        (-1#) -> Nothing
        i -> -- We return either element or greater one
@@ -298,7 +309,9 @@ cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline
                  _  -> case b `eqWord#` valB of
                         0# -> Nothing
                         _ -> Just (I# i))
+-}
   where
+{-
     c n = negateInt# (n +# 1#)
     go :: Int# -> Int#
     go i = case i <# len of
@@ -308,14 +321,16 @@ cachedBinarySearch (Fingerprint (W64# a) (W64# b)) fpAs fpBs = inline
         _  -> 
          let !(W64# valA) = indexPrimArray fpAs (I# i)
              !(W64# valB) = indexPrimArray fpBs (I# i)
-         in case a `leWord#` valA of
-            0# -> go (2# *# i +# 2#)
-            _ -> case b `leWord#` valB of
-                0# -> go (2# *# i +# 1# +# (a `eqWord#` valA))
-                _  -> go (2# *# i +# 1#)
-
+         in case a `gtWord#` valA of
+              0# ->  case a `eqWord#` valB of
+                  0# -> go (2# *# i +# 1#)
+                  _ -> case b `leWord#` valB of
+                        0# -> go (2# *# i +# 1# +# 2#)
+                        _  -> go (2# *# i +# 1#)
+              _ -> go (2# *# i +# 2#)
+-}
     len :: Int#
-    len = let !(I# l) = sizeofPrimArray fpAs in l
+    len = let !(I# l) = sizeofPrimArray as in l
 {-# INLINE cachedBinarySearch #-}
 
 ----------------------------------------------------------------------------

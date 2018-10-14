@@ -41,6 +41,7 @@ library
                        Data.TypeRepMap
                        Data.TypeRepMap.Internal
   ghc-options:         -Wall
+  c-sources:           cbits/search.c
   build-depends:       base >= 4.10 && < 5
                      , containers >= 0.5.10.2 && < 0.7
                      , ghc-prim ^>= 0.5.1.1
